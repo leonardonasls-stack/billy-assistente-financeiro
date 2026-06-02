@@ -1,9 +1,20 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
+import * as ImagePicker from "expo-image-picker";
 import {
-    ActivityIndicator,
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    query,
+    where,
+} from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
     Alert,
     Image,
+    Modal,
     ScrollView,
     StyleSheet,
     Switch,
@@ -11,108 +22,166 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+
+import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthService } from "../services/AuthService";
-import { ProfilePictureService } from "../services/ProfilePictureService";
-
+import { FinanceService } from "../services/FinanceService";
+import { auth, db } from "../services/firebaseConfig";
+import { UserService } from "../services/UserService";
 const PerfilScreen = ({ navigation }: any) => {
+  const [perfil, setPerfil] = useState<any>(null);
+  const [resumo, setResumo] = useState({
+    saldo: "0.00",
+    qtd: 0,
+    gasto: "0.00",
+  });
   const [biometriaAtiva, setBiometriaAtiva] = useState(false);
-  const [notificacoesAtivas, setNotificacoesAtivas] = useState(true);
-  const [modoEscuro, setModoEscuro] = useState(false);
-
-  // Estado para a foto de perfil
   const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [carregandoFoto, setCarregandoFoto] = useState(false);
 
-  // Simulando dados do usuário
-  const usuario = {
-    nome: "Sandero Silva",
-    email: "sandero.billy@email.com",
-    dataNascimento: "12/05/1995",
-    cpf: "123.456.789-00",
-  };
+  // Novo estado para controlar o Modal Customizado da Foto
+  const [modalFotoVisivel, setModalFotoVisivel] = useState(false);
 
-  useEffect(() => {
-    // Carrega preferência de biometria
-    AuthService.obterPreferenciaBiometria().then(setBiometriaAtiva);
+  useFocusEffect(
+    useCallback(() => {
+      const carregarDados = async () => {
+        const dadosPerfil = await UserService.obterPerfilLocal();
+        setPerfil(dadosPerfil);
 
-    // Carrega a foto de perfil salva
-    ProfilePictureService.obterFotoUri().then(setFotoUri);
-  }, []);
+        if (dadosPerfil && dadosPerfil.foto) {
+          setFotoUri(dadosPerfil.foto);
+        }
 
-  const toggleBiometria = async (novoStatus: boolean) => {
-    const suporte = await AuthService.verificarSuporteHardware();
-    if (!suporte && novoStatus === true) {
-      Alert.alert("Erro", "Seu dispositivo não suporta biometria.");
+        const biometriaStatus = await AuthService.obterPreferenciaBiometria();
+        setBiometriaAtiva(biometriaStatus);
+
+        const transacoes = await FinanceService.carregarDados();
+        const ent = transacoes
+          .filter((t: any) => t.tipo === "Entrada")
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+        const sai = transacoes
+          .filter((t: any) => t.tipo === "Saída")
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+        setResumo({
+          saldo: (ent - sai).toFixed(2),
+          qtd: transacoes.length,
+          gasto: sai.toFixed(2),
+        });
+      };
+      carregarDados();
+    }, []),
+  );
+
+  // === FUNÇÕES SEPARADAS PARA CÂMERA E GALERIA ===
+  const abrirCamera = async () => {
+    setModalFotoVisivel(false);
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permissão negada", "O Billy precisa de acesso à câmera.");
       return;
     }
-    setBiometriaAtiva(novoStatus);
-    await AuthService.salvarPreferenciaBiometria(novoStatus);
-  };
-
-  // Lógica para alterar a foto (Câmera/Galeria)
-  const handleAlterarFoto = () => {
-    Alert.alert(
-      "Foto de Perfil",
-      "Escolha como deseja alterar sua foto:",
-      [
-        { text: "Tirar Foto (Câmera)", onPress: handleTirarFoto },
-        { text: "Escolher da Galeria", onPress: handleEscolherGaleria },
-        fotoUri
-          ? {
-              text: "Remover Foto Atual",
-              onPress: handleRemoverFoto,
-              style: "destructive",
-            }
-          : { text: "Cancelar", style: "cancel" },
-        fotoUri ? { text: "Cancelar", style: "cancel" } : null,
-      ].filter(Boolean) as any, // Remove o null caso não tenha fotoUri
-    );
-  };
-
-  const processarNovaFoto = async (uri: string | null) => {
-    if (uri) {
-      setCarregandoFoto(true);
-      try {
-        await ProfilePictureService.salvarFotoUri(uri);
-        setFotoUri(uri);
-      } catch (e) {
-        Alert.alert("Erro", "Não foi possível salvar a foto.");
-      } finally {
-        setCarregandoFoto(false);
-      }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
+    if (!result.canceled) {
+      salvarNovaFoto(result.assets[0].uri);
     }
   };
 
-  const handleTirarFoto = async () => {
+  const abrirGaleria = async () => {
+    setModalFotoVisivel(false);
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permissão negada", "O Billy precisa de acesso à galeria.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.5,
+    });
+    if (!result.canceled) {
+      salvarNovaFoto(result.assets[0].uri);
+    }
+  };
+
+  const salvarNovaFoto = async (uri: string) => {
+    setFotoUri(uri);
+    const perfilAtualizado = { ...perfil, foto: uri };
+    setPerfil(perfilAtualizado);
+
+    await UserService.salvarPerfilLocal(perfilAtualizado);
+
+    const user = auth.currentUser;
+    if (user) {
+      UserService.sincronizarPerfilNuvem(user.uid, perfilAtualizado);
+    }
+  };
+  // =====================================
+
+  const handleToggleBiometria = async () => {
     try {
-      const uri = await ProfilePictureService.tirarFoto();
-      processarNovaFoto(uri);
-    } catch (e: any) {
-      Alert.alert("Aviso", e.message);
+      const novoStatus = !biometriaAtiva;
+      setBiometriaAtiva(novoStatus);
+      await AuthService.salvarPreferenciaBiometria(novoStatus);
+    } catch (error) {
+      Alert.alert(
+        "Erro",
+        "Não foi possível alterar a configuração de biometria.",
+      );
     }
   };
 
-  const handleEscolherGaleria = async () => {
-    try {
-      const uri = await ProfilePictureService.escolherDaGaleria();
-      processarNovaFoto(uri);
-    } catch (e: any) {
-      Alert.alert("Aviso", e.message);
-    }
+  const handleLogout = async () => {
+    await auth.signOut();
+    await UserService.limparPerfilLocal();
+    navigation.replace("Login");
   };
 
-  const handleRemoverFoto = () => {
+  const handleExcluirConta = () => {
     Alert.alert(
-      "Remover Foto",
-      "Tem certeza que deseja apagar sua foto de perfil atual?",
+      "Excluir Conta",
+      "Esta ação apagará todos os seus registros financeiros. Deseja continuar?",
       [
         { text: "Cancelar", style: "cancel" },
         {
-          text: "Remover",
+          text: "Excluir",
           style: "destructive",
           onPress: async () => {
-            await ProfilePictureService.removerFoto();
-            setFotoUri(null);
+            try {
+              const user = auth.currentUser;
+              if (!user) return;
+
+              const q = query(
+                collection(db, "transacoes"),
+                where("userId", "==", user.uid),
+              );
+              const querySnapshot = await getDocs(q);
+
+              const promessasDelecao = querySnapshot.docs.map((documento) =>
+                deleteDoc(doc(db, "transacoes", documento.id)),
+              );
+              await Promise.all(promessasDelecao);
+
+              await deleteDoc(doc(db, "usuarios", user.uid));
+              await user.delete();
+
+              await AsyncStorage.removeItem("@billy_transacoes");
+              await UserService.limparPerfilLocal();
+
+              navigation.replace("Login");
+            } catch (error: any) {
+              if (error.code === "auth/requires-recent-login") {
+                Alert.alert(
+                  "Aviso",
+                  "Faça login novamente para realizar esta ação de segurança.",
+                );
+              }
+            }
           },
         },
       ],
@@ -120,149 +189,158 @@ const PerfilScreen = ({ navigation }: any) => {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        {/* AVATAR INTERATIVO */}
-        <TouchableOpacity
-          style={styles.avatarContainer}
-          onPress={handleAlterarFoto}
-          activeOpacity={0.8}
-        >
-          {carregandoFoto ? (
-            <ActivityIndicator size="large" color="#0056b3" />
-          ) : fotoUri ? (
-            <Image source={{ uri: fotoUri }} style={styles.avatarImagem} />
-          ) : (
-            <Text style={styles.avatarTexto}>{usuario.nome.charAt(0)}</Text>
-          )}
-
-          {/* Ícone de Câmera sobreposto */}
-          <View style={styles.iconeCameraContainer}>
-            <MaterialCommunityIcons name="camera" size={16} color="#fff" />
-          </View>
-        </TouchableOpacity>
-
-        <Text style={styles.nomeUsuario}>{usuario.nome}</Text>
-        <Text style={styles.emailUsuario}>{usuario.email}</Text>
-      </View>
-
+    <SafeAreaView style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
       >
-        {/* SEÇÃO 1: DADOS PESSOAIS */}
-        <Text style={styles.sessaoTitulo}>Dados Pessoais</Text>
-        <View style={styles.card}>
-          <View style={styles.linhaInfo}>
-            <Text style={styles.label}>Data de Nascimento</Text>
-            <Text style={styles.valor}>{usuario.dataNascimento}</Text>
-          </View>
-          <View style={styles.divisor} />
-          <View style={styles.linhaInfo}>
-            <Text style={styles.label}>CPF</Text>
-            <Text style={styles.valor}>{usuario.cpf}</Text>
-          </View>
-        </View>
-
-        {/* SEÇÃO 2: SEGURANÇA */}
-        <Text style={styles.sessaoTitulo}>Segurança</Text>
-        <View style={styles.card}>
-          <View style={styles.linhaSwitch}>
-            <View style={styles.iconeTexto}>
-              <MaterialCommunityIcons
-                name="fingerprint"
-                size={24}
-                color="#0056b3"
-              />
-              <Text style={styles.textoOpcao}>Login por Biometria</Text>
-            </View>
-            <Switch
-              value={biometriaAtiva}
-              onValueChange={toggleBiometria}
-              trackColor={{ false: "#D1D5DB", true: "#93C5FD" }}
-              thumbColor={biometriaAtiva ? "#2563EB" : "#F3F4F6"}
-            />
-          </View>
-
-          <View style={styles.divisor} />
-
+        <View style={styles.topHeader}>
           <TouchableOpacity
-            style={styles.linhaBotao}
-            onPress={() =>
-              Alert.alert("Em breve", "Tela de alterar senha na Fase 3.")
-            }
+            style={styles.iconButton}
+            onPress={() => navigation.goBack()}
           >
-            <View style={styles.iconeTexto}>
-              <MaterialCommunityIcons
-                name="lock-reset"
-                size={24}
-                color="#0056b3"
-              />
-              <Text style={styles.textoOpcao}>Alterar Senha</Text>
-            </View>
             <MaterialCommunityIcons
-              name="chevron-right"
+              name="arrow-left"
               size={24}
-              color="#9CA3AF"
+              color="#4B5563"
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}>
+            <MaterialCommunityIcons
+              name="pencil-outline"
+              size={24}
+              color="#2563EB"
             />
           </TouchableOpacity>
         </View>
 
-        {/* SEÇÃO 3: PREFERÊNCIAS */}
-        <Text style={styles.sessaoTitulo}>Preferências</Text>
-        <View style={styles.card}>
-          <View style={styles.linhaSwitch}>
-            <View style={styles.iconeTexto}>
-              <MaterialCommunityIcons
-                name="bell-outline"
-                size={24}
-                color="#0056b3"
-              />
-              <Text style={styles.textoOpcao}>Notificações de Gastos</Text>
+        <View style={styles.profileSection}>
+          <TouchableOpacity
+            style={styles.avatarWrapper}
+            activeOpacity={0.8}
+            onPress={() => setModalFotoVisivel(true)} // Abre o nosso novo modal
+          >
+            <View style={styles.avatarContainer}>
+              {fotoUri ? (
+                <Image source={{ uri: fotoUri }} style={styles.profileImage} />
+              ) : (
+                <MaterialCommunityIcons name="account" size={60} color="#fff" />
+              )}
             </View>
-            <Switch
-              value={notificacoesAtivas}
-              onValueChange={setNotificacoesAtivas}
-              trackColor={{ false: "#D1D5DB", true: "#93C5FD" }}
-            />
+            <View style={styles.cameraBadge}>
+              <MaterialCommunityIcons name="camera" size={16} color="#fff" />
+            </View>
+          </TouchableOpacity>
+
+          <Text style={styles.nameText}>
+            {perfil
+              ? `${perfil.nome} ${perfil.sobrenome || ""}`.trim()
+              : "Carregando..."}
+          </Text>
+          <Text style={styles.locationText}>Maceió, AL</Text>
+        </View>
+
+        <View style={styles.statsCard}>
+          <View style={styles.statColumn}>
+            <Text style={styles.statLabel}>Saldo</Text>
+            <Text style={styles.statValue}>R$ {resumo.saldo}</Text>
           </View>
-
-          <View style={styles.divisor} />
-
-          <View style={styles.linhaSwitch}>
-            <View style={styles.iconeTexto}>
-              <MaterialCommunityIcons
-                name="theme-light-dark"
-                size={24}
-                color="#0056b3"
-              />
-              <Text style={styles.textoOpcao}>Modo Escuro (Beta)</Text>
-            </View>
-            <Switch
-              value={modoEscuro}
-              onValueChange={setModoEscuro}
-              trackColor={{ false: "#D1D5DB", true: "#93C5FD" }}
-            />
+          <View style={styles.verticalDivider} />
+          <View style={styles.statColumn}>
+            <Text style={styles.statLabel}>Registros</Text>
+            <Text style={styles.statValue}>{resumo.qtd}</Text>
+          </View>
+          <View style={styles.verticalDivider} />
+          <View style={styles.statColumn}>
+            <Text style={styles.statLabel}>Gastos</Text>
+            <Text style={styles.statValue}>R$ {resumo.gasto}</Text>
           </View>
         </View>
 
-        {/* BOTÃO SAIR */}
-        <TouchableOpacity
-          style={styles.botaoSair}
-          onPress={() => navigation.navigate("Login")}
-        >
-          <MaterialCommunityIcons name="logout" size={24} color="#EF4444" />
-          <Text style={styles.textoSair}>Sair da Conta</Text>
-        </TouchableOpacity>
+        <View style={styles.menuContainer}>
+          <View style={styles.menuItemAcao}>
+            <MaterialCommunityIcons
+              name="email-outline"
+              size={24}
+              color="#2563EB"
+              style={styles.menuIcon}
+            />
+            <Text style={styles.menuTextAcao}>
+              {perfil?.email || "Email não informado"}
+            </Text>
+          </View>
 
-        <View style={{ height: 100 }} />
+          <View style={styles.menuItemAcao}>
+            <MaterialCommunityIcons
+              name="calendar-month-outline"
+              size={24}
+              color="#2563EB"
+              style={styles.menuIcon}
+            />
+            <Text style={styles.menuTextAcao}>
+              Nasc: {perfil?.dataNascimento || "Não informada"}
+            </Text>
+          </View>
+
+          <View style={styles.menuItemBiometria}>
+            <View style={styles.biometriaEsquerda}>
+              <MaterialCommunityIcons
+                name="fingerprint"
+                size={24}
+                color="#2563EB"
+                style={styles.menuIcon}
+              />
+              <Text style={styles.menuTextAcao}>Acesso por Biometria</Text>
+            </View>
+            <Switch
+              trackColor={{ false: "#D1D5DB", true: "#93C5FD" }}
+              thumbColor={biometriaAtiva ? "#2563EB" : "#F3F4F6"}
+              onValueChange={handleToggleBiometria}
+              value={biometriaAtiva}
+            />
+          </View>
+
+          <TouchableOpacity style={styles.menuItemAcao} onPress={handleLogout}>
+            <MaterialCommunityIcons
+              name="logout"
+              size={24}
+              color="#F59E0B"
+              style={styles.menuIcon}
+            />
+            <Text style={[styles.menuTextAcao, { color: "#F59E0B" }]}>
+              Sair da Conta
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItemAcao}
+            onPress={handleExcluirConta}
+          >
+            <MaterialCommunityIcons
+              name="account-remove-outline"
+              size={24}
+              color="#EF4444"
+              style={styles.menuIcon}
+            />
+            <Text
+              style={[
+                styles.menuTextAcao,
+                { color: "#EF4444", fontWeight: "bold" },
+              ]}
+            >
+              Excluir Conta
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
-      {/* BARRA INFERIOR */}
+      {/* BARRA INFERIOR PADRONIZADA */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate("Dashboard")}
+          onPress={() =>
+            navigation.reset({ index: 0, routes: [{ name: "Dashboard" }] })
+          }
         >
           <MaterialCommunityIcons
             name="home-outline"
@@ -271,9 +349,10 @@ const PerfilScreen = ({ navigation }: any) => {
           />
           <Text style={styles.menuText}>Início</Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate("Carteira")}
+          onPress={() => navigation.replace("Carteira")}
         >
           <MaterialCommunityIcons
             name="wallet-outline"
@@ -282,48 +361,145 @@ const PerfilScreen = ({ navigation }: any) => {
           />
           <Text style={styles.menuText}>Carteira</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem}>
           <MaterialCommunityIcons name="account" size={28} color="#0056b3" />
           <Text style={styles.menuTextAtivo}>Perfil</Text>
         </TouchableOpacity>
       </View>
-    </View>
+
+      {/* NOVO: MODAL CUSTOMIZADO (BOTTOM SHEET) PARA FOTO */}
+      <Modal
+        visible={modalFotoVisivel}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setModalFotoVisivel(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setModalFotoVisivel(false)}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalDragIndicator} />
+            <Text style={styles.modalTitle}>Foto de Perfil</Text>
+            <Text style={styles.modalSubtitle}>
+              Escolha de onde deseja adicionar sua foto
+            </Text>
+
+            <View style={styles.modalOptionsRow}>
+              <TouchableOpacity
+                style={styles.modalOptionBtn}
+                onPress={abrirCamera}
+              >
+                <View
+                  style={[
+                    styles.modalIconContainer,
+                    { backgroundColor: "#EEF2FF" },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name="camera-outline"
+                    size={32}
+                    color="#2563EB"
+                  />
+                </View>
+                <Text style={styles.modalOptionText}>Câmera</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalOptionBtn}
+                onPress={abrirGaleria}
+              >
+                <View
+                  style={[
+                    styles.modalIconContainer,
+                    { backgroundColor: "#EEF2FF" },
+                  ]}
+                >
+                  <MaterialCommunityIcons
+                    name="image-outline"
+                    size={32}
+                    color="#2563EB"
+                  />
+                </View>
+                <Text style={styles.modalOptionText}>Galeria</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.modalCancelBtn}
+              onPress={() => setModalFotoVisivel(false)}
+            >
+              <Text style={styles.modalCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
-  header: {
-    backgroundColor: "#0056b3",
-    paddingTop: 60,
-    paddingBottom: 30,
-    alignItems: "center",
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    elevation: 5,
+  container: {
+    flex: 1,
+    backgroundColor: "#F5F7FA",
   },
-
-  avatarContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 30,
+  },
+  topHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  iconButton: {
+    width: 45,
+    height: 45,
     backgroundColor: "#fff",
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 15,
-    elevation: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  profileSection: {
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 30,
+  },
+  avatarWrapper: {
     position: "relative",
-    borderWidth: 2,
+    marginBottom: 15,
+  },
+  avatarContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#9CA3AF",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 4,
     borderColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 5,
     overflow: "hidden",
   },
-  avatarImagem: { width: "100%", height: "100%" },
-  avatarTexto: { fontSize: 36, fontWeight: "bold", color: "#0056b3" },
-  iconeCameraContainer: {
+  profileImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  cameraBadge: {
     position: "absolute",
-    bottom: 0,
-    right: 0,
-    backgroundColor: "#0056b3",
+    bottom: 2,
+    right: 2,
+    backgroundColor: "#2563EB",
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -331,78 +507,83 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 2,
     borderColor: "#fff",
+    elevation: 3,
   },
-
-  nomeUsuario: { color: "#fff", fontSize: 22, fontWeight: "bold" },
-  emailUsuario: { color: "#D1D5DB", fontSize: 14, marginTop: 5 },
-
-  scrollContent: { padding: 20 },
-  sessaoTitulo: {
-    fontSize: 14,
+  nameText: {
+    fontSize: 22,
     fontWeight: "bold",
-    color: "#6B7280",
-    textTransform: "uppercase",
-    marginBottom: 10,
-    marginTop: 15,
-    marginLeft: 5,
-  },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    padding: 15,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-
-  linhaInfo: { paddingVertical: 10 },
-  label: { fontSize: 12, color: "#9CA3AF", marginBottom: 4 },
-  valor: { fontSize: 16, color: "#1F2937", fontWeight: "500" },
-
-  linhaSwitch: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  linhaBotao: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  iconeTexto: { flexDirection: "row", alignItems: "center" },
-  textoOpcao: {
-    fontSize: 16,
     color: "#1F2937",
-    marginLeft: 15,
+  },
+  locationText: {
+    fontSize: 14,
+    color: "#6B7280",
+    marginTop: 5,
+  },
+  statsCard: {
+    flexDirection: "row",
+    backgroundColor: "#2563EB",
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 10,
+    justifyContent: "space-evenly",
+    alignItems: "center",
+    marginBottom: 30,
+    elevation: 5,
+    shadowColor: "#2563EB",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  statColumn: {
+    alignItems: "center",
+    flex: 1,
+  },
+  statLabel: {
+    color: "#E0E7FF",
+    fontSize: 12,
+    marginBottom: 5,
+  },
+  statValue: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  verticalDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+  },
+  menuContainer: {
+    paddingHorizontal: 10,
+  },
+  menuItemAcao: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    marginBottom: 5,
+  },
+  menuItemBiometria: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    marginBottom: 5,
+  },
+  biometriaEsquerda: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  menuIcon: {
+    marginRight: 20,
+    width: 30,
+    textAlign: "center",
+  },
+  menuTextAcao: {
+    fontSize: 16,
+    color: "#4B5563",
     fontWeight: "500",
   },
-
-  divisor: { height: 1, backgroundColor: "#F3F4F6", width: "100%" },
-
-  botaoSair: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 30,
-    padding: 15,
-    backgroundColor: "#FEE2E2",
-    borderRadius: 12,
-  },
-  textoSair: {
-    color: "#EF4444",
-    fontWeight: "bold",
-    fontSize: 16,
-    marginLeft: 10,
-  },
-
   bottomBar: {
-    position: "absolute",
-    bottom: 0,
-    width: "100%",
     flexDirection: "row",
     backgroundColor: "#fff",
     height: 70,
@@ -410,17 +591,94 @@ const styles = StyleSheet.create({
     borderTopColor: "#E5E7EB",
     paddingBottom: 5,
     elevation: 15,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
   },
-  menuItem: { flex: 1, justifyContent: "center", alignItems: "center" },
-  menuText: { fontSize: 12, color: "#9CA3AF", marginTop: 2, fontWeight: "500" },
+  menuItem: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  menuText: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    marginTop: 2,
+    fontWeight: "500",
+  },
   menuTextAtivo: {
     fontSize: 12,
     color: "#0056b3",
     marginTop: 2,
+    fontWeight: "bold",
+  },
+
+  // ESTILOS DO NOVO MODAL
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+  modalDragIndicator: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#D1D5DB",
+    borderRadius: 2,
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#1F2937",
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: "#6B7280",
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  modalOptionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    width: "100%",
+    marginBottom: 30,
+  },
+  modalOptionBtn: {
+    alignItems: "center",
+  },
+  modalIconContainer: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  modalOptionText: {
+    fontSize: 14,
+    color: "#4B5563",
+    fontWeight: "600",
+  },
+  modalCancelBtn: {
+    width: "100%",
+    paddingVertical: 15,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: "#4B5563",
     fontWeight: "bold",
   },
 });

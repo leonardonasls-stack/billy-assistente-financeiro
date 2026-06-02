@@ -7,12 +7,13 @@ export const Header = ({
   saldoTotal,
   mostrarValores,
   onToggleValores,
+  nomeUsuario,
 }: any) => {
   return (
     <View style={styles.header}>
       <View style={styles.headerTop}>
         <View style={styles.boasVindas}>
-          <Text style={styles.textoOla}>Olá, Sandero!</Text>
+          <Text style={styles.textoOla}>Olá, {nomeUsuario}</Text>
           <Text style={styles.textoBemVindo}>Bem-vindo de volta.</Text>
         </View>
         <TouchableOpacity style={styles.iconeNotificacao}>

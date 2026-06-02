@@ -27,29 +27,30 @@ const CarteiraScreen = ({ navigation }: any) => {
   useFocusEffect(
     useCallback(() => {
       const carregarDados = async () => {
-        await FinanceService.carregarDados();
-        const transacoes = FinanceService.listarTodas();
+        // CORREÇÃO: Pegando o resultado do motor Híbrido direto da Promessa
+        const transacoes = (await FinanceService.carregarDados()) || [];
 
         // 1. Entradas
         const entradas = transacoes
-          .filter((t) => t.tipo === "Entrada")
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
+          .filter((t: any) => t.tipo === "Entrada")
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
 
         // 2. Raio-X das Necessidades (Fixas vs Variáveis)
         const categoriasFixas = ["Moradia", "Educação", "Saúde"];
         const gastosFixos = transacoes
           .filter(
-            (t) => t.tipo === "Saída" && categoriasFixas.includes(t.categoria),
+            (t: any) =>
+              t.tipo === "Saída" && categoriasFixas.includes(t.categoria),
           )
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
 
         const categoriasVariaveis = ["Alimentação", "Transporte"];
         const gastosVariaveis = transacoes
           .filter(
-            (t) =>
+            (t: any) =>
               t.tipo === "Saída" && categoriasVariaveis.includes(t.categoria),
           )
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
 
         const gastoNecessidades = gastosFixos + gastosVariaveis;
 
@@ -57,10 +58,10 @@ const CarteiraScreen = ({ navigation }: any) => {
         const categoriasDesejos = ["Lazer", "Outros"];
         const gastoDesejos = transacoes
           .filter(
-            (t) =>
+            (t: any) =>
               t.tipo === "Saída" && categoriasDesejos.includes(t.categoria),
           )
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
+          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
 
         const totalGastos = gastoNecessidades + gastoDesejos;
         const saldoLivre = entradas - totalGastos;
@@ -99,7 +100,6 @@ const CarteiraScreen = ({ navigation }: any) => {
     analise.gastoDesejos > analise.idealDesejos ? "#EF4444" : "#10B981";
 
   // O CONSELHEIRO BILLY: Gera mensagens inteligentes baseadas no saldo
-  // O CONSELHEIRO BILLY: Gera alertas baseados nas porcentagens reais!
   const gerarConselho = () => {
     if (analise.entradas === 0)
       return "Registre suas entradas (salário, bônus) para eu poder analisar sua saúde financeira.";
@@ -124,7 +124,7 @@ const CarteiraScreen = ({ navigation }: any) => {
       return `⚠️ Alerta no Essencial: Suas Necessidades bateram ${pctNecessidades.toFixed(0)}% (o limite é 50%). Como é difícil cortar contas fixas, tente espremer os gastos variáveis (mercado/transporte).`;
     }
 
-    // Cenário 4: Não estourou as porcentagens, mas fechou no vermelho (ex: teve um gasto "Outros" não categorizado)
+    // Cenário 4: Não estourou as porcentagens, mas fechou no vermelho
     if (analise.saldoLivre < 0) {
       return `🚨 Alerta Vermelho! Você está gastando R$ ${Math.abs(analise.saldoLivre).toFixed(2)} a mais do que ganha.`;
     }
@@ -287,10 +287,15 @@ const CarteiraScreen = ({ navigation }: any) => {
       </ScrollView>
 
       {/* BARRA INFERIOR (BOTTOM MENU) */}
+      {/* BARRA INFERIOR (BOTTOM MENU) */}
+      {/* BARRA INFERIOR (BOTTOM MENU) */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate("Dashboard")}
+          // Limpa a pilha inteira e volta direto para o Início
+          onPress={() =>
+            navigation.reset({ index: 0, routes: [{ name: "Dashboard" }] })
+          }
         >
           <MaterialCommunityIcons
             name="home-outline"
@@ -307,7 +312,8 @@ const CarteiraScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.navigate("Perfil")}
+          // Substitui a Carteira pelo Perfil (não empilha)
+          onPress={() => navigation.replace("Perfil")}
         >
           <MaterialCommunityIcons
             name="account-outline"

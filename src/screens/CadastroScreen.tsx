@@ -50,27 +50,33 @@ const CadastroScreen = ({ navigation }: any) => {
       <Formik
         initialValues={{ descricao: "", valor: "", tipo: "", categoria: "" }}
         validationSchema={MovimentacaoSchema}
-        onSubmit={async (values) => {
-          const dataHoraAtual = new Date().toLocaleString("pt-BR");
+        onSubmit={async (valores, { resetForm }) => {
+          try {
+            // Cria a data e hora formatada automaticamente (ex: "24/10/2023 - 14:30")
+            const agora = new Date();
+            const dataFormatada = `${agora.getDate().toString().padStart(2, "0")}/${(agora.getMonth() + 1).toString().padStart(2, "0")}/${agora.getFullYear()} - ${agora.getHours().toString().padStart(2, "0")}:${agora.getMinutes().toString().padStart(2, "0")}`;
 
-          const novaTransacao = {
-            id: Date.now().toString(),
-            descricao: values.descricao,
-            tipo: values.tipo,
-            categoria: values.categoria,
-            valor: values.valor.replace(",", "."),
-            dataHora: dataHoraAtual,
-          };
+            // Junta os valores do form com a data gerada
+            const transacaoCompleta = {
+              ...valores,
+              dataHora: dataFormatada,
+            };
 
-          await FinanceService.adicionar(novaTransacao);
+            await FinanceService.salvarTransacao(transacaoCompleta);
 
-          const prefixo = values.tipo === "Entrada" ? "+" : "-";
-          Alert.alert(
-            "Salvo",
-            `${values.tipo} registrada: ${prefixo} R$ ${values.valor}`,
-          );
-
-          navigation.navigate("Dashboard", { novaTransacao: true });
+            // Sucesso!
+            Alert.alert("Sucesso", "Movimentação registrada!");
+            resetForm();
+            navigation.navigate("Dashboard");
+          } catch (error: any) {
+            // Agora o erro real será exibido na tela para sabermos exatamente o que falhou
+            Alert.alert(
+              "Erro ao Salvar",
+              error.message ||
+                "Ocorreu um erro desconhecido ao tentar salvar no banco de dados.",
+            );
+            console.error("ERRO NO CADASTRO:", error);
+          }
         }}
       >
         {({

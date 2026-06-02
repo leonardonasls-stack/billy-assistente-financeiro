@@ -57,8 +57,8 @@ const EditarScreen = ({ route, navigation }: any) => {
         }}
         validationSchema={MovimentacaoSchema}
         onSubmit={async (values) => {
+          // 1. Monta o objeto com as alterações do formulário preservando a data original
           const transacaoAtualizada = {
-            id: item.id,
             descricao: values.descricao,
             tipo: values.tipo,
             categoria: values.categoria,
@@ -66,10 +66,18 @@ const EditarScreen = ({ route, navigation }: any) => {
             dataHora: item.dataHora,
           };
 
-          await FinanceService.atualizar(transacaoAtualizada);
+          try {
+            // 2. Chama a nova função híbrida passando o ID e o objeto atualizado
+            await FinanceService.atualizarTransacao(
+              item.id,
+              transacaoAtualizada,
+            );
 
-          Alert.alert("Sucesso", "Registro atualizado com sucesso!");
-          navigation.navigate("Dashboard", { atualizado: true });
+            Alert.alert("Sucesso", "Registro atualizado com sucesso!");
+            navigation.navigate("Dashboard", { atualizado: true });
+          } catch (error) {
+            Alert.alert("Erro", "Não foi possível atualizar o registro.");
+          }
         }}
       >
         {({

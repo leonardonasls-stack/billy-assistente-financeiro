@@ -1,195 +1,226 @@
-import { Feather } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+    Alert,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
 import { FinanceService } from "../services/FinanceService";
 
 const DetalhesScreen = ({ route, navigation }: any) => {
+  // Recupera a movimentação que foi clicada no Dashboard
   const { item } = route.params;
-  const isEntrada = item.tipo === "Entrada";
 
-  // Função para confirmar e excluir
+  // Lógica assíncrona de exclusão integrada com o Firebase + AsyncStorage
   const handleExcluir = () => {
     Alert.alert(
       "Excluir Registro",
-      "Tem certeza que deseja apagar esta movimentação?",
+      "Tem certeza que deseja apagar esta transação do celular e da nuvem?",
       [
         { text: "Cancelar", style: "cancel" },
         {
-          text: "Apagar",
+          text: "Excluir",
           style: "destructive",
           onPress: async () => {
-            await FinanceService.remover(item.id); // Executa a remoção blindada
-            navigation.goBack(); // Volta para o Dashboard atualizando a lista na hora!
+            try {
+              // Executa a remoção híbrida imediata
+              await FinanceService.removerTransacao(item.id);
+
+              Alert.alert("Sucesso", "Registro excluído com sucesso!");
+              // Retorna ao Dashboard forçando a atualização da lista
+              navigation.navigate("Dashboard", { atualizado: true });
+            } catch (error) {
+              Alert.alert("Erro", "Não foi possível deletar o registro.");
+            }
           },
         },
       ],
     );
   };
 
+  const ehEntrada = item.tipo === "Entrada";
+
   return (
-    <View style={styles.container}>
-      <View style={styles.headerForm}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.btnVoltar}
-        >
-          <Text style={styles.txtBtnVoltar}>{"< Voltar"}</Text>
-        </TouchableOpacity>
-        <Text style={styles.titulo}>Detalhes</Text>
-        <View style={{ width: 60 }} />
-      </View>
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.card}>
+        {/* TOPO DO CARD COM ÍCONE DINÂMICO */}
+        <View style={styles.headerRow}>
+          <Text style={styles.titulo}>Detalhes do Registro</Text>
+          <MaterialCommunityIcons
+            name={ehEntrada ? "arrow-up-circle" : "arrow-down-circle"}
+            size={36}
+            color={ehEntrada ? "#10B981" : "#EF4444"}
+          />
+        </View>
 
-      <View style={styles.content}>
-        <View style={styles.card}>
-          <View style={styles.cabecalhoCard}>
-            <Text style={styles.descricao} numberOfLines={1}>
-              {item.descricao}
-            </Text>
-            <Text
-              style={[
-                styles.valor,
-                { color: isEntrada ? "#10B981" : "#EF4444" },
-              ]}
-            >
-              {isEntrada ? "+" : "-"} R$ {item.valor}
-            </Text>
-          </View>
+        <View style={styles.divisor} />
 
-          <View style={styles.divisor} />
+        {/* CAMPOS DE INFORMAÇÃO */}
+        <View style={styles.infoGroup}>
+          <Text style={styles.label}>Descrição</Text>
+          <Text style={styles.valorTexto}>{item.descricao}</Text>
+        </View>
 
-          <View style={styles.linhaInfo}>
-            <Text style={styles.label}>Categoria</Text>
-            <Text style={styles.valorInfo}>
-              {item.categoria || "Não categorizado"}
-            </Text>
-          </View>
+        <View style={styles.infoGroup}>
+          <Text style={styles.label}>Valor</Text>
+          <Text
+            style={[
+              styles.valorNumerico,
+              { color: ehEntrada ? "#10B981" : "#EF4444" },
+            ]}
+          >
+            R$ {parseFloat(item.valor).toFixed(2)}
+          </Text>
+        </View>
 
-          <View style={styles.linhaInfo}>
-            <Text style={styles.label}>Data e Hora</Text>
-            <Text style={styles.valorInfo}>{item.dataHora}</Text>
-          </View>
+        <View style={styles.infoGroup}>
+          <Text style={styles.label}>Tipo</Text>
+          <Text
+            style={[
+              styles.tipoTag,
+              {
+                backgroundColor: ehEntrada ? "#E6F4EA" : "#FCE8E6",
+                color: ehEntrada ? "#137333" : "#C5221F",
+              },
+            ]}
+          >
+            {item.tipo}
+          </Text>
+        </View>
 
-          <View style={styles.linhaInfo}>
-            <Text style={styles.label}>Tipo</Text>
-            <Text
-              style={[
-                styles.badge,
-                { backgroundColor: isEntrada ? "#10B981" : "#EF4444" },
-              ]}
-            >
-              {item.tipo}
-            </Text>
-          </View>
+        <View style={styles.infoGroup}>
+          <Text style={styles.label}>Categoria</Text>
+          <Text style={styles.valorTexto}>{item.categoria || "Outros"}</Text>
+        </View>
 
-          <View style={styles.divisor} />
+        <View style={styles.infoGroup}>
+          <Text style={styles.label}>Data e Hora do Cadastro</Text>
+          <Text style={styles.dataTexto}>
+            {item.dataHora || "Não informada"}
+          </Text>
+        </View>
 
-          {/* NOVOS BOTÕES DE AÇÃO */}
-          <View style={styles.areaBotoes}>
-            <TouchableOpacity
-              style={[styles.botaoAcao, { backgroundColor: "#E5E7EB" }]}
-              onPress={() => navigation.navigate("Editar", { item: item })}
-            >
-              <Feather name="edit-2" size={18} color="#4B5563" />
-              <Text style={[styles.textoBotaoAcao, { color: "#4B5563" }]}>
-                Editar
-              </Text>
-            </TouchableOpacity>
+        {/* BARRA DE AÇÕES (VOLTAR, EDITAR, EXCLUIR) */}
+        <View style={styles.botoesContainer}>
+          <TouchableOpacity
+            style={[styles.botao, { backgroundColor: "#9CA3AF" }]}
+            onPress={() => navigation.goBack()}
+          >
+            <MaterialCommunityIcons name="arrow-left" size={20} color="#fff" />
+            <Text style={styles.textoBotao}>Voltar</Text>
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.botaoAcao, { backgroundColor: "#FEE2E2" }]}
-              onPress={handleExcluir}
-            >
-              <Feather name="trash-2" size={18} color="#EF4444" />
-              <Text style={[styles.textoBotaoAcao, { color: "#EF4444" }]}>
-                Apagar
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.botao, { backgroundColor: "#2563EB" }]}
+            onPress={() => navigation.navigate("Editar", { item })}
+          >
+            <MaterialCommunityIcons name="pencil" size={20} color="#fff" />
+            <Text style={styles.textoBotao}>Editar</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.botao, { backgroundColor: "#EF4444" }]}
+            onPress={handleExcluir}
+          >
+            <MaterialCommunityIcons name="trash-can" size={20} color="#fff" />
+            <Text style={styles.textoBotao}>Excluir</Text>
+          </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F7FA" },
-  headerForm: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#0056b3",
+  container: {
+    flexGrow: 1,
+    backgroundColor: "#F5F7FA",
     padding: 20,
-    paddingTop: 50,
+    justifyContent: "center",
   },
-  btnVoltar: { padding: 10 },
-  txtBtnVoltar: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  titulo: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-  content: { padding: 15, marginTop: 10 },
   card: {
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    elevation: 3,
+    borderRadius: 16,
+    padding: 20,
+    elevation: 4,
     shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
   },
-  cabecalhoCard: {
+  headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 15,
   },
-  descricao: {
-    fontSize: 16,
+  titulo: {
+    fontSize: 22,
     fontWeight: "bold",
     color: "#1F2937",
-    flex: 1,
-    marginRight: 10,
   },
-  valor: { fontSize: 16, fontWeight: "bold" },
   divisor: {
     height: 1,
     backgroundColor: "#E5E7EB",
     width: "100%",
-    marginBottom: 15,
+    marginBottom: 20,
   },
-  linhaInfo: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    width: "100%",
-    marginBottom: 12,
+  infoGroup: {
+    marginBottom: 20,
   },
-  label: { fontSize: 13, color: "#6B7280", fontWeight: "600" },
-  valorInfo: { fontSize: 14, color: "#1F2937", fontWeight: "bold" },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 6,
-    color: "#fff",
-    fontWeight: "bold",
+  label: {
     fontSize: 12,
-    overflow: "hidden",
+    fontWeight: "bold",
+    color: "#9CA3AF",
+    textTransform: "uppercase",
+    marginBottom: 4,
   },
-
-  // Estilos da nova área de botões
-  areaBotoes: {
+  valorTexto: {
+    fontSize: 18,
+    color: "#1F2937",
+    fontWeight: "500",
+  },
+  valorNumerico: {
+    fontSize: 26,
+    fontWeight: "bold",
+  },
+  dataTexto: {
+    fontSize: 15,
+    color: "#4B5563",
+  },
+  tipoTag: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 6,
+    fontSize: 14,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  botoesContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 5,
+    marginTop: 20,
+    gap: 10,
   },
-  botaoAcao: {
+  botao: {
+    flex: 1,
     flexDirection: "row",
+    height: 48,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginHorizontal: 5,
+    gap: 5,
+    elevation: 2,
   },
-  textoBotaoAcao: { fontWeight: "bold", marginLeft: 8, fontSize: 14 },
+  textoBotao: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 14,
+  },
 });
 
 export default DetalhesScreen;

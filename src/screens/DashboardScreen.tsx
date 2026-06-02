@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Header } from "../components/Header";
 import { FinanceService } from "../services/FinanceService";
+import { UserService } from "../services/UserService";
 
 const obterEstiloCategoria = (categoria: string) => {
   switch (categoria) {
@@ -68,22 +69,26 @@ const DashboardScreen = ({ navigation }: any) => {
   useFocusEffect(
     useCallback(() => {
       const carregarDados = async () => {
-        await FinanceService.carregarDados();
-        const lista = FinanceService.listarTodas();
-        setTransacoes(lista);
+        try {
+          // A ÚNICA ALTERAÇÃO FOI AQUI: Recebe a lista direto do motor Híbrido
+          const lista = await FinanceService.carregarDados();
+          setTransacoes(lista || []);
 
-        const ent = lista
-          .filter((t) => t.tipo === "Entrada")
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
-        const sai = lista
-          .filter((t) => t.tipo === "Saída")
-          .reduce((acc, t) => acc + parseFloat(t.valor), 0);
+          const ent = (lista || [])
+            .filter((t: any) => t.tipo === "Entrada")
+            .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+          const sai = (lista || [])
+            .filter((t: any) => t.tipo === "Saída")
+            .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
 
-        setResumo({
-          total: (ent - sai).toFixed(2),
-          entradas: ent.toFixed(2),
-          saidas: sai.toFixed(2),
-        });
+          setResumo({
+            total: (ent - sai).toFixed(2),
+            entradas: ent.toFixed(2),
+            saidas: sai.toFixed(2),
+          });
+        } catch (error) {
+          console.error("Erro ao carregar dados", error);
+        }
       };
       carregarDados();
     }, []),
@@ -117,6 +122,40 @@ const DashboardScreen = ({ navigation }: any) => {
       console.error("Erro ao salvar preferência de visibilidade", error);
     }
   };
+  const [nomeUsuario, setNomeUsuario] = useState("Usuário");
+  useFocusEffect(
+    useCallback(() => {
+      const carregarDados = async () => {
+        try {
+          // Carrega o nome do usuário do AsyncStorage
+          // Puxa o perfil e extrai APENAS a primeira palavra do nome
+          const perfil = await UserService.obterPerfilLocal();
+          if (perfil && perfil.nome) {
+            const primeiroNome = perfil.nome.split(" ")[0];
+            setNomeUsuario(primeiroNome);
+          }
+          const lista = await FinanceService.carregarDados();
+          setTransacoes(lista || []);
+
+          const ent = (lista || [])
+            .filter((t: any) => t.tipo === "Entrada")
+            .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+          const sai = (lista || [])
+            .filter((t: any) => t.tipo === "Saída")
+            .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+          setResumo({
+            total: (ent - sai).toFixed(2),
+            entradas: ent.toFixed(2),
+            saidas: sai.toFixed(2),
+          });
+        } catch (error) {
+          console.error("Erro ao carregar dados", error);
+        }
+      };
+      carregarDados();
+    }, []),
+  );
 
   return (
     <View style={styles.container}>
@@ -126,6 +165,7 @@ const DashboardScreen = ({ navigation }: any) => {
         saldoTotal={resumo.total}
         mostrarValores={mostrarValores}
         onToggleValores={toggleVisibilidade}
+        nomeUsuario={nomeUsuario} // <-- Passando o nome dinâmico para o componente
       />
 
       <View style={styles.resumoContainer}>

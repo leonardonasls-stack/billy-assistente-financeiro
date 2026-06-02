@@ -44,7 +44,9 @@
           "photosPermission": "O Billy precisa acessar suas fotos para você escolher sua foto de perfil.",
           "cameraPermission": "O Billy precisa acessar sua câmera para você tirar sua foto de perfil."
         }
-      ]
+      ],
+      "expo-font",
+      "expo-router"
     ]
   }
 }

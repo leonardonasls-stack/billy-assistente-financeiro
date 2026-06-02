@@ -1,7 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import React from "react";
-import CadastroScreen from "./src/screens/CadastroScreen"; // O 'C' maiúsculo nas duas pontas!
+import CadastroScreen from "./src/screens/CadastroScreen";
 import CarteiraScreen from "./src/screens/CarteiraScreen";
 import DashboardScreen from "./src/screens/DashboardScreen";
 import DetalhesScreen from "./src/screens/DetalhesScreen";

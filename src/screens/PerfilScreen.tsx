@@ -25,20 +25,14 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthService } from "../services/AuthService";
-import { FinanceService } from "../services/FinanceService";
 import { auth, db } from "../services/firebaseConfig";
 import { UserService } from "../services/UserService";
+
 const PerfilScreen = ({ navigation }: any) => {
   const [perfil, setPerfil] = useState<any>(null);
-  const [resumo, setResumo] = useState({
-    saldo: "0.00",
-    qtd: 0,
-    gasto: "0.00",
-  });
   const [biometriaAtiva, setBiometriaAtiva] = useState(false);
   const [fotoUri, setFotoUri] = useState<string | null>(null);
 
-  // Novo estado para controlar o Modal Customizado da Foto
   const [modalFotoVisivel, setModalFotoVisivel] = useState(false);
 
   useFocusEffect(
@@ -53,26 +47,11 @@ const PerfilScreen = ({ navigation }: any) => {
 
         const biometriaStatus = await AuthService.obterPreferenciaBiometria();
         setBiometriaAtiva(biometriaStatus);
-
-        const transacoes = await FinanceService.carregarDados();
-        const ent = transacoes
-          .filter((t: any) => t.tipo === "Entrada")
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-        const sai = transacoes
-          .filter((t: any) => t.tipo === "Saída")
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-
-        setResumo({
-          saldo: (ent - sai).toFixed(2),
-          qtd: transacoes.length,
-          gasto: sai.toFixed(2),
-        });
       };
       carregarDados();
     }, []),
   );
 
-  // === FUNÇÕES SEPARADAS PARA CÂMERA E GALERIA ===
   const abrirCamera = async () => {
     setModalFotoVisivel(false);
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -81,10 +60,11 @@ const PerfilScreen = ({ navigation }: any) => {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
+      cameraType: ImagePicker.CameraType.front,
     });
     if (!result.canceled) {
       salvarNovaFoto(result.assets[0].uri);
@@ -99,7 +79,7 @@ const PerfilScreen = ({ navigation }: any) => {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,
@@ -121,13 +101,56 @@ const PerfilScreen = ({ navigation }: any) => {
       UserService.sincronizarPerfilNuvem(user.uid, perfilAtualizado);
     }
   };
-  // =====================================
 
   const handleToggleBiometria = async () => {
     try {
       const novoStatus = !biometriaAtiva;
-      setBiometriaAtiva(novoStatus);
-      await AuthService.salvarPreferenciaBiometria(novoStatus);
+
+      if (novoStatus === true) {
+        Alert.alert(
+          "Segurança Billy",
+          "Para ativar o login rápido, precisamos confirmar sua identidade e vincular seus dados a este aparelho.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            {
+              text: "Confirmar Digital",
+              onPress: async () => {
+                const sucesso = await AuthService.autenticarBiometria();
+
+                if (sucesso) {
+                  const user = auth.currentUser;
+                  const perfilAtual =
+                    (await UserService.obterPerfilLocal()) || {};
+
+                  if (user) {
+                    const perfilConsolidado = {
+                      ...perfilAtual,
+                      uid: user.uid,
+                      email: user.email || perfilAtual.email,
+                    };
+                    await UserService.salvarPerfilLocal(perfilConsolidado);
+                  }
+
+                  setBiometriaAtiva(true);
+                  await AuthService.salvarPreferenciaBiometria(true);
+                  Alert.alert(
+                    "Sucesso!",
+                    "Biometria ativada. Você já pode entrar offline de forma rápida.",
+                  );
+                } else {
+                  Alert.alert(
+                    "Falha",
+                    "Digital não reconhecida. A biometria não foi ativada.",
+                  );
+                }
+              },
+            },
+          ],
+        );
+      } else {
+        setBiometriaAtiva(false);
+        await AuthService.salvarPreferenciaBiometria(false);
+      }
     } catch (error) {
       Alert.alert(
         "Erro",
@@ -218,7 +241,7 @@ const PerfilScreen = ({ navigation }: any) => {
           <TouchableOpacity
             style={styles.avatarWrapper}
             activeOpacity={0.8}
-            onPress={() => setModalFotoVisivel(true)} // Abre o nosso novo modal
+            onPress={() => setModalFotoVisivel(true)}
           >
             <View style={styles.avatarContainer}>
               {fotoUri ? (
@@ -238,23 +261,6 @@ const PerfilScreen = ({ navigation }: any) => {
               : "Carregando..."}
           </Text>
           <Text style={styles.locationText}>Maceió, AL</Text>
-        </View>
-
-        <View style={styles.statsCard}>
-          <View style={styles.statColumn}>
-            <Text style={styles.statLabel}>Saldo</Text>
-            <Text style={styles.statValue}>R$ {resumo.saldo}</Text>
-          </View>
-          <View style={styles.verticalDivider} />
-          <View style={styles.statColumn}>
-            <Text style={styles.statLabel}>Registros</Text>
-            <Text style={styles.statValue}>{resumo.qtd}</Text>
-          </View>
-          <View style={styles.verticalDivider} />
-          <View style={styles.statColumn}>
-            <Text style={styles.statLabel}>Gastos</Text>
-            <Text style={styles.statValue}>R$ {resumo.gasto}</Text>
-          </View>
         </View>
 
         <View style={styles.menuContainer}>
@@ -334,13 +340,11 @@ const PerfilScreen = ({ navigation }: any) => {
         </View>
       </ScrollView>
 
-      {/* BARRA INFERIOR PADRONIZADA */}
+      {/* BARRA INFERIOR */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() =>
-            navigation.reset({ index: 0, routes: [{ name: "Dashboard" }] })
-          }
+          onPress={() => navigation.navigate("Dashboard")}
         >
           <MaterialCommunityIcons
             name="home-outline"
@@ -352,7 +356,7 @@ const PerfilScreen = ({ navigation }: any) => {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => navigation.replace("Carteira")}
+          onPress={() => navigation.navigate("Carteira")}
         >
           <MaterialCommunityIcons
             name="wallet-outline"
@@ -362,13 +366,25 @@ const PerfilScreen = ({ navigation }: any) => {
           <Text style={styles.menuText}>Carteira</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => navigation.navigate("HistoricoMensal")}
+        >
+          <MaterialCommunityIcons
+            name="calendar-month-outline"
+            size={28}
+            color="#9CA3AF"
+          />
+          <Text style={styles.menuText}>Histórico</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem}>
           <MaterialCommunityIcons name="account" size={28} color="#0056b3" />
           <Text style={styles.menuTextAtivo}>Perfil</Text>
         </TouchableOpacity>
       </View>
 
-      {/* NOVO: MODAL CUSTOMIZADO (BOTTOM SHEET) PARA FOTO */}
+      {/* MODAL PARA FOTO */}
       <Modal
         visible={modalFotoVisivel}
         transparent={true}
@@ -447,7 +463,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 30,
+    paddingBottom: 100, // Espaço para a barra inferior
   },
   topHeader: {
     flexDirection: "row",
@@ -519,40 +535,6 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 5,
   },
-  statsCard: {
-    flexDirection: "row",
-    backgroundColor: "#2563EB",
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 10,
-    justifyContent: "space-evenly",
-    alignItems: "center",
-    marginBottom: 30,
-    elevation: 5,
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  statColumn: {
-    alignItems: "center",
-    flex: 1,
-  },
-  statLabel: {
-    color: "#E0E7FF",
-    fontSize: 12,
-    marginBottom: 5,
-  },
-  statValue: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  verticalDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-  },
   menuContainer: {
     paddingHorizontal: 10,
   },
@@ -584,6 +566,10 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     backgroundColor: "#fff",
     height: 70,
@@ -609,8 +595,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "bold",
   },
-
-  // ESTILOS DO NOVO MODAL
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -623,10 +607,6 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: "center",
     elevation: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
   },
   modalDragIndicator: {
     width: 40,

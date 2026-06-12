@@ -20,13 +20,14 @@ import * as Yup from "yup";
 import { AuthService } from "../services/AuthService";
 import { UserService } from "../services/UserService";
 
+// IMPORTAÇÕES DO FIREBASE
 import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
 } from "firebase/auth";
 import { auth } from "../services/firebaseConfig";
 
-// 1. ESQUEMAS DE VALIDAÇÃO (Agora com Sobrenome)
+// ESQUEMAS DE VALIDAÇÃO DINÂMICOS
 const LoginSchema = Yup.object().shape({
   email: Yup.string().email("E-mail inválido").required("Informe seu e-mail"),
   password: Yup.string().required("Informe sua senha"),
@@ -51,24 +52,21 @@ const LoginScreen = ({ navigation }: any) => {
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Função para aplicar a máscara de data (DD/MM/AAAA) automaticamente
+  // MÁSCARA AUTOMÁTICA DE DATA
   const aplicarMascaraData = (texto: string) => {
-    // Remove tudo o que não for número
     const apenasNumeros = texto.replace(/\D/g, "");
-
-    // Limita a no máximo 8 dígitos (DDMMAAAA)
     const numerosLimitados = apenasNumeros.substring(0, 8);
 
-    // Aplica a formatação com as barras baseado no tamanho do texto
-    if (numerosLimitados.length <= 2) {
-      return numerosLimitados;
-    }
+    if (numerosLimitados.length <= 2) return numerosLimitados;
     if (numerosLimitados.length <= 4) {
       return `${numerosLimitados.substring(0, 2)}/${numerosLimitados.substring(2)}`;
     }
     return `${numerosLimitados.substring(0, 2)}/${numerosLimitados.substring(2, 4)}/${numerosLimitados.substring(4)}`;
   };
 
+  // INICIALIZAÇÃO DA BIOMETRIA 100% OFFLINE-FIRST CORRIGIDA
+  // INICIALIZAÇÃO DA BIOMETRIA
+  // INICIALIZAÇÃO DA BIOMETRIA
   useEffect(() => {
     const iniciarBiometria = async () => {
       const ativa = await AuthService.obterPreferenciaBiometria();
@@ -77,41 +75,74 @@ const LoginScreen = ({ navigation }: any) => {
       if (ativa) {
         const sucesso = await AuthService.autenticarBiometria();
         if (sucesso) {
-          navigation.navigate("Dashboard");
+          const perfilLocal = await UserService.obterPerfilLocal();
+
+          // Regra inteligente: se tem nome no cofre, tá ancorado e pode entrar!
+          if (perfilLocal && perfilLocal.nome) {
+            navigation.navigate("Dashboard");
+          } else {
+            Alert.alert(
+              "Configuração Inicial",
+              "Por favor, realize o primeiro login com e-mail e senha para sincronizar seu dispositivo.",
+            );
+          }
         }
       }
     };
     iniciarBiometria();
   }, []);
 
+  // DISPARO MANUAL
   const dispararBiometriaNovamente = async () => {
     const sucesso = await AuthService.autenticarBiometria();
     if (sucesso) {
-      navigation.navigate("Dashboard");
+      const perfilLocal = await UserService.obterPerfilLocal();
+      if (perfilLocal && perfilLocal.nome) {
+        navigation.navigate("Dashboard");
+      } else {
+        Alert.alert(
+          "Aviso",
+          "Por favor, faça o login manual com e-mail e senha uma primeira vez.",
+        );
+      }
     }
   };
-
+  // LÓGICA DE AUTENTICAÇÃO ATUALIZADA E BLINDADA
   const handleAutenticacao = async (values: any) => {
     setLoading(true);
     try {
       if (isLoginMode) {
+        // FLUXO DE LOGIN CONVENCIONAL
         const userCredential = await signInWithEmailAndPassword(
           auth,
           values.email,
           values.password,
         );
 
+        // 1. Tenta baixar os dados existentes na nuvem
         await UserService.baixarPerfilNuvem(userCredential.user.uid);
+
+        // 2. GARANTIA DE PERSISTÊNCIA LOCAL (Evita o ciclo infinito da biometria)
+        const perfilExistente = (await UserService.obterPerfilLocal()) || {};
+        const perfilConsolidado = {
+          ...perfilExistente,
+          uid: userCredential.user.uid,
+          email: values.email,
+          nome: perfilExistente.nome || "Usuário", // Fallback seguro caso esteja totalmente offline
+        };
+
+        await UserService.salvarPerfilLocal(perfilConsolidado);
         navigation.navigate("Dashboard");
       } else {
+        // FLUXO DE CADASTRO NOVO
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           values.email,
           values.password,
         );
 
-        // Salvando Nome e Sobrenome separados no banco de dados
         const novoPerfil = {
+          uid: userCredential.user.uid,
           nome: values.nome,
           sobrenome: values.sobrenome,
           dataNascimento: values.dataNascimento,
@@ -178,7 +209,6 @@ const LoginScreen = ({ navigation }: any) => {
                 <View style={{ width: "100%" }}>
                   {!isLoginMode && (
                     <>
-                      {/* CAIXA DE NOME */}
                       <TextInput
                         style={styles.input}
                         placeholder="Nome"
@@ -193,7 +223,6 @@ const LoginScreen = ({ navigation }: any) => {
                         </Text>
                       )}
 
-                      {/* CAIXA DE SOBRENOME */}
                       <TextInput
                         style={styles.input}
                         placeholder="Sobrenome"
@@ -208,20 +237,18 @@ const LoginScreen = ({ navigation }: any) => {
                         </Text>
                       )}
 
-                      {/* CAIXA DE DATA DE NASCIMENTO */}
                       <TextInput
                         style={styles.input}
                         placeholder="Data de Nascimento (DD/MM/AAAA)"
                         placeholderTextColor="#666"
                         value={values.dataNascimento}
-                        // MUDANÇA AQUI: Mascara o texto antes de salvar no Formik
                         onChangeText={(texto) => {
                           const dataFormatada = aplicarMascaraData(texto);
                           setFieldValue("dataNascimento", dataFormatada);
                         }}
                         onBlur={handleBlur("dataNascimento")}
                         keyboardType="numeric"
-                        maxLength={10} // Evita que o usuário digite números a mais
+                        maxLength={10}
                       />
                       {touched.dataNascimento && errors.dataNascimento && (
                         <Text style={styles.errorText}>

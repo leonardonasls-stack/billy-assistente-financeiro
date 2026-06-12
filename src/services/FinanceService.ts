@@ -1,98 +1,151 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { collection, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
+import {
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    query,
+    setDoc,
+    where,
+} from "firebase/firestore";
 import { auth, db } from "./firebaseConfig";
+import { UserService } from "./UserService";
 const STORAGE_KEY = "@billy_transacoes";
 
 export const FinanceService = {
   // ==========================================
-  // 1. LEITURA (Velocidade da Luz - Offline)
+  // 2. GRAVAÇÃO (Híbrida: Celular -> Nuvem)
   // ==========================================
   // ==========================================
-  // 1. LEITURA HÍBRIDA (Nuvem + Local)
+  // 1. SALVAMENTO COM MARCAÇÃO DE SYNC
+  // ==========================================
+  async salvarTransacao(transacao: any) {
+    try {
+      await auth.authStateReady();
+      const user = auth.currentUser;
+      const perfilLocal = await UserService.obterPerfilLocal();
+      const userId = user?.uid || perfilLocal?.uid;
+
+      if (!userId) throw new Error("Usuário não identificado.");
+
+      const idLocal = Date.now().toString();
+      const novaTransacao = {
+        ...transacao,
+        id: idLocal,
+        userId: userId,
+        createdAt: new Date().toISOString(),
+        sincronizado: false, // 👈 Nasce como FALSE porque ainda não bateu no servidor
+      };
+
+      // Salva local imediato
+      const listaAtual = await this.carregarDados();
+      listaAtual.push(novaTransacao);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(listaAtual));
+
+      // Dispara para o Firestore em background
+      this.sincronizarCadastro(novaTransacao);
+
+      return idLocal;
+    } catch (error) {
+      console.error("Erro ao salvar:", error);
+      throw error;
+    }
+  },
+
+  // ==========================================
+  // 2. RECONCILIAÇÃO COM DETECÇÃO DE DELETADOS
   // ==========================================
   async carregarDados() {
     try {
+      await auth.authStateReady();
       const user = auth.currentUser;
+      const perfilLocal = await UserService.obterPerfilLocal();
+      const userId = user?.uid || perfilLocal?.uid;
 
-      // Se o usuário estiver logado, tenta buscar as novidades da nuvem primeiro
-      if (user) {
+      // Busca o cache local atual do aparelho
+      const dadosLocaisBrutos = await AsyncStorage.getItem(STORAGE_KEY);
+      const transacoesLocais: any[] = dadosLocaisBrutos
+        ? JSON.parse(dadosLocaisBrutos)
+        : [];
+
+      if (userId) {
         try {
+          // REMOVA O orderBy DAQUI DE DENTRO
           const q = query(
             collection(db, "transacoes"),
-            where("userId", "==", user.uid),
+            where("userId", "==", userId),
           );
+
           const querySnapshot = await getDocs(q);
 
           const transacoesNuvem = querySnapshot.docs.map((documento) => ({
             id: documento.id,
             ...documento.data(),
+            sincronizado: true,
           }));
 
-          // Se encontrou dados na nuvem, atualiza o celular e retorna ordenado
-          if (transacoesNuvem.length > 0) {
-            await AsyncStorage.setItem(
-              STORAGE_KEY,
-              JSON.stringify(transacoesNuvem),
-            );
+          const mapaTransacoes = new Map();
 
-            return transacoesNuvem.sort(
-              (a: any, b: any) =>
-                new Date(b.createdAt).getTime() -
-                new Date(a.createdAt).getTime(),
-            );
-          }
+          // PASSO A: A Nuvem é a nossa verdade absoluta para dados ativos.
+          // Inserimos todas as transações da nuvem no mapa primeiro.
+          transacoesNuvem.forEach((tNuvem) =>
+            mapaTransacoes.set(tNuvem.id, tNuvem),
+          );
+
+          // PASSO B: Analisamos o cache do celular para tratar os deltas
+          // PASSO B: Analisamos o cache do celular para tratar os deltas
+          transacoesLocais.forEach((tLocal) => {
+            if (!mapaTransacoes.has(tLocal.id)) {
+              // A CORREÇÃO: Só protegemos o dado se ele for EXPLICITAMENTE offline (false).
+              // Se for "true" ou "undefined" (registro antigo legado), ele deve ser apagado.
+              if (tLocal.sincronizado === false) {
+                // Cenário 1: É UM REGISTRO NOVO CRIADO OFFLINE! (Protegemos)
+                mapaTransacoes.set(tLocal.id, tLocal);
+              } else {
+                // Cenário 2: Ele era da nuvem ou é um registro antigo que sumiu -> FOI DELETADO!
+                console.log(
+                  `Detectado registro fantasma/deletado na nuvem: ${tLocal.id}`,
+                );
+              }
+            } else {
+              // Se já está no mapa, fazemos a checagem normal de atualização por data
+              const tNuvem = mapaTransacoes.get(tLocal.id);
+              const dataLocal = new Date(tLocal.createdAt || 0).getTime();
+              const dataNuvem = new Date(tNuvem.createdAt || 0).getTime();
+
+              if (dataLocal > dataNuvem) {
+                mapaTransacoes.set(tLocal.id, tLocal); // Prevalece o mais recente
+              }
+            }
+          });
+
+          // Converte o mapa final limpo de volta para Array
+          const listaReconciliada = Array.from(mapaTransacoes.values());
+
+          // Sobrescreve o armazenamento local com a lista perfeitamente espelhada
+          await AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify(listaReconciliada),
+          );
+
+          return listaReconciliada.sort(
+            (a: any, b: any) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          );
         } catch (netError) {
-          // Se cair aqui, significa que o dispositivo está sem internet (offline)
           console.log(
-            "Dispositivo offline ou falha de rede. Carregando do cache local...",
+            "Sem conexão para sincronizar exclusões. Usando cache local.",
           );
         }
       }
 
-      // FALLBACK: Se estiver sem internet ou o Firestore estiver vazio, usa o AsyncStorage
-      const dados = await AsyncStorage.getItem(STORAGE_KEY);
-      const transacoes = dados ? JSON.parse(dados) : [];
-
-      return transacoes.sort(
+      return transacoesLocais.sort(
         (a: any, b: any) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
     } catch (error) {
-      console.error("Erro crítico ao carregar dados: ", error);
+      console.error("Erro crítico na sincronização: ", error);
       return [];
-    }
-  },
-
-  // ==========================================
-  // 2. GRAVAÇÃO (Híbrida: Celular -> Nuvem)
-  // ==========================================
-  async salvarTransacao(transacao: any) {
-    const user = auth.currentUser;
-    if (!user) throw new Error("Usuário não autenticado");
-
-    // 1. Monta o objeto gerando um ID único no PRÓPRIO CELULAR
-    const idLocal = Date.now().toString();
-    const novaTransacao = {
-      ...transacao,
-      id: idLocal,
-      userId: user.uid,
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      // A) SALVA NO CELULAR (Imediato)
-      const listaAtual = await this.carregarDados();
-      listaAtual.push(novaTransacao);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(listaAtual));
-
-      // B) DISPARA O FANTASMA PARA A NUVEM
-      // Note que NÃO usamos o 'await' aqui. A tela não vai esperar isso terminar!
-      this.sincronizarCadastro(novaTransacao);
-
-      return idLocal; // Retorna sucesso para a tela instantaneamente
-    } catch (error) {
-      console.error("Erro ao salvar localmente: ", error);
-      throw error;
     }
   },
 

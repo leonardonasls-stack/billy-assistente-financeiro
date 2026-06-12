@@ -8,6 +8,8 @@ import DetalhesScreen from "./src/screens/DetalhesScreen";
 import EditarScreen from "./src/screens/EditarScreen";
 import LoginScreen from "./src/screens/LoginScreen";
 import PerfilScreen from "./src/screens/PerfilScreen";
+// 1. IMPORTAÇÃO ATUALIZADA:
+import HistoricoMensalScreen from "./src/screens/HistoricoMensalScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -22,6 +24,11 @@ export default function App() {
         <Stack.Screen name="Detalhes" component={DetalhesScreen} />
         <Stack.Screen name="Carteira" component={CarteiraScreen} />
         <Stack.Screen name="Editar" component={EditarScreen} />
+        {/* 2. ROTA ATUALIZADA: */}
+        <Stack.Screen
+          name="HistoricoMensal"
+          component={HistoricoMensalScreen}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

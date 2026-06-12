@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     ScrollView,
     StatusBar,
@@ -11,7 +11,27 @@ import {
 } from "react-native";
 import { FinanceService } from "../services/FinanceService";
 
+const mesesNomes = [
+  "Janeiro",
+  "Fevereiro",
+  "Março",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro",
+];
+
 const CarteiraScreen = ({ navigation }: any) => {
+  // --- 1. NOVOS ESTADOS PARA O FILTRO MENSAL ---
+  const [listaCompleta, setListaCompleta] = useState<any[]>([]);
+  const [mesReferencia, setMesReferencia] = useState(new Date());
+
+  // Estado original da sua análise mantido intacto
   const [analise, setAnalise] = useState({
     entradas: 0,
     idealNecessidades: 0,
@@ -24,68 +44,91 @@ const CarteiraScreen = ({ navigation }: any) => {
     reservaIdeal: 0,
   });
 
+  // --- 2. CARREGAR BANCO DE DADOS GLOBAL ---
   useFocusEffect(
     useCallback(() => {
-      const carregarDados = async () => {
-        // CORREÇÃO: Pegando o resultado do motor Híbrido direto da Promessa
+      const carregarBanco = async () => {
         const transacoes = (await FinanceService.carregarDados()) || [];
-
-        // 1. Entradas
-        const entradas = transacoes
-          .filter((t: any) => t.tipo === "Entrada")
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-
-        // 2. Raio-X das Necessidades (Fixas vs Variáveis)
-        const categoriasFixas = ["Moradia", "Educação", "Saúde"];
-        const gastosFixos = transacoes
-          .filter(
-            (t: any) =>
-              t.tipo === "Saída" && categoriasFixas.includes(t.categoria),
-          )
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-
-        const categoriasVariaveis = ["Alimentação", "Transporte"];
-        const gastosVariaveis = transacoes
-          .filter(
-            (t: any) =>
-              t.tipo === "Saída" && categoriasVariaveis.includes(t.categoria),
-          )
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-
-        const gastoNecessidades = gastosFixos + gastosVariaveis;
-
-        // 3. Desejos
-        const categoriasDesejos = ["Lazer", "Outros"];
-        const gastoDesejos = transacoes
-          .filter(
-            (t: any) =>
-              t.tipo === "Saída" && categoriasDesejos.includes(t.categoria),
-          )
-          .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
-
-        const totalGastos = gastoNecessidades + gastoDesejos;
-        const saldoLivre = entradas - totalGastos;
-
-        // A Reserva Ideal é 3x o custo de vida básico da pessoa
-        const reservaIdeal =
-          gastoNecessidades > 0 ? gastoNecessidades * 3 : entradas * 1.5;
-
-        setAnalise({
-          entradas,
-          idealNecessidades: entradas * 0.5,
-          idealDesejos: entradas * 0.3,
-          gastosFixos,
-          gastosVariaveis,
-          gastoNecessidades,
-          gastoDesejos,
-          saldoLivre,
-          reservaIdeal,
-        });
+        setListaCompleta(transacoes);
       };
-      carregarDados();
+      carregarBanco();
     }, []),
   );
 
+  // --- 3. MOTOR DE CÁLCULO (RODA AO MUDAR O MÊS) ---
+  useEffect(() => {
+    // Descobre o mês selecionado
+    const ano = mesReferencia.getFullYear();
+    const mes = String(mesReferencia.getMonth() + 1).padStart(2, "0");
+    const anoMesAlvo = `${ano}-${mes}`;
+
+    // Filtra os dados apenas para o mês escolhido
+    const transacoesFiltradas = listaCompleta.filter((t: any) => {
+      if (!t.createdAt) return false;
+      return t.createdAt.startsWith(anoMesAlvo);
+    });
+
+    // A PARTIR DAQUI: Sua matemática original intacta, mas rodando em cima do mês filtrado!
+    const entradas = transacoesFiltradas
+      .filter((t: any) => t.tipo === "Entrada")
+      .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+    const categoriasFixas = ["Moradia", "Educação", "Saúde"];
+    const gastosFixos = transacoesFiltradas
+      .filter(
+        (t: any) => t.tipo === "Saída" && categoriasFixas.includes(t.categoria),
+      )
+      .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+    const categoriasVariaveis = ["Alimentação", "Transporte"];
+    const gastosVariaveis = transacoesFiltradas
+      .filter(
+        (t: any) =>
+          t.tipo === "Saída" && categoriasVariaveis.includes(t.categoria),
+      )
+      .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+    const gastoNecessidades = gastosFixos + gastosVariaveis;
+
+    const categoriasDesejos = ["Lazer", "Outros"];
+    const gastoDesejos = transacoesFiltradas
+      .filter(
+        (t: any) =>
+          t.tipo === "Saída" && categoriasDesejos.includes(t.categoria),
+      )
+      .reduce((acc: number, t: any) => acc + parseFloat(t.valor), 0);
+
+    const totalGastos = gastoNecessidades + gastoDesejos;
+    const saldoLivre = entradas - totalGastos;
+
+    const reservaIdeal =
+      gastoNecessidades > 0 ? gastoNecessidades * 3 : entradas * 1.5;
+
+    setAnalise({
+      entradas,
+      idealNecessidades: entradas * 0.5,
+      idealDesejos: entradas * 0.3,
+      gastosFixos,
+      gastosVariaveis,
+      gastoNecessidades,
+      gastoDesejos,
+      saldoLivre,
+      reservaIdeal,
+    });
+  }, [mesReferencia, listaCompleta]);
+
+  // --- 4. FUNÇÕES DO SELETOR DE TEMPO ---
+  const irParaMesAnterior = () =>
+    setMesReferencia(
+      new Date(mesReferencia.getFullYear(), mesReferencia.getMonth() - 1, 1),
+    );
+  const irParaMesProximo = () =>
+    setMesReferencia(
+      new Date(mesReferencia.getFullYear(), mesReferencia.getMonth() + 1, 1),
+    );
+  const nomeMesExibicao = `${mesesNomes[mesReferencia.getMonth()]} de ${mesReferencia.getFullYear()}`;
+
+  // Funções originais mantidas
   const getPorcentagem = (gasto: number, ideal: number): any => {
     if (ideal === 0) return "0%";
     const pct = (gasto / ideal) * 100;
@@ -99,44 +142,34 @@ const CarteiraScreen = ({ navigation }: any) => {
   const corBarraDesejo =
     analise.gastoDesejos > analise.idealDesejos ? "#EF4444" : "#10B981";
 
-  // O CONSELHEIRO BILLY: Gera mensagens inteligentes baseadas no saldo
   const gerarConselho = () => {
     if (analise.entradas === 0)
-      return "Registre suas entradas (salário, bônus) para eu poder analisar sua saúde financeira.";
+      return "Registre suas entradas (salário, bônus) deste mês para eu poder analisar sua saúde financeira.";
 
-    // Calcula a porcentagem exata da renda que já foi gasta
     const pctNecessidades =
       (analise.gastoNecessidades / analise.entradas) * 100;
     const pctDesejos = (analise.gastoDesejos / analise.entradas) * 100;
 
-    // Cenário 1: Estourou os dois limites!
     if (pctNecessidades > 50 && pctDesejos > 30) {
-      return `🚨 Cuidado duplo! Suas Necessidades estão em ${pctNecessidades.toFixed(0)}% e Desejos em ${pctDesejos.toFixed(0)}%. Você ultrapassou os dois limites recomendados. Freio total nos gastos!`;
+      return `🚨 Cuidado duplo! Suas Necessidades estão em ${pctNecessidades.toFixed(0)}% e Desejos em ${pctDesejos.toFixed(0)}%. Você ultrapassou os dois limites recomendados neste mês!`;
     }
-
-    // Cenário 2: Estourou apenas os Desejos (Lazer/Compras)
     if (pctDesejos > 30) {
-      return `⚠️ Alerta de Lazer: Você já comprometeu ${pctDesejos.toFixed(0)}% da sua renda com Desejos (o limite é 30%). Segure as compras não essenciais para não faltar no fim do mês!`;
+      return `⚠️ Alerta de Lazer: Você já comprometeu ${pctDesejos.toFixed(0)}% da sua renda deste mês com Desejos (limite de 30%). Segure as compras não essenciais!`;
     }
-
-    // Cenário 3: Estourou apenas as Necessidades (Contas Básicas)
     if (pctNecessidades > 50) {
-      return `⚠️ Alerta no Essencial: Suas Necessidades bateram ${pctNecessidades.toFixed(0)}% (o limite é 50%). Como é difícil cortar contas fixas, tente espremer os gastos variáveis (mercado/transporte).`;
+      return `⚠️ Alerta no Essencial: Suas Necessidades bateram ${pctNecessidades.toFixed(0)}% (limite de 50%). Tente espremer os gastos variáveis (mercado/transporte).`;
     }
-
-    // Cenário 4: Não estourou as porcentagens, mas fechou no vermelho
     if (analise.saldoLivre < 0) {
-      return `🚨 Alerta Vermelho! Você está gastando R$ ${Math.abs(analise.saldoLivre).toFixed(2)} a mais do que ganha.`;
+      return `🚨 Alerta Vermelho! Neste mês você gastou R$ ${Math.abs(analise.saldoLivre).toFixed(2)} a mais do que ganhou.`;
     }
-
-    // Cenário 5: Tudo perfeito
-    return `🌟 Orçamento saudável! Você está gastando dentro dos limites e sobraram R$ ${analise.saldoLivre.toFixed(2)}. Transfira isso agora para a sua Caixinha de Emergência!`;
+    return `🌟 Orçamento saudável! Você está gastando dentro dos limites e sobraram R$ ${analise.saldoLivre.toFixed(2)}. Transfira isso para a sua Caixinha de Emergência!`;
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
+      {/* CABEÇALHO AZUL COM O SELETOR DE MÊS INJETADO */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.tituloApp}>Educação Financeira</Text>
@@ -144,6 +177,24 @@ const CarteiraScreen = ({ navigation }: any) => {
         <Text style={styles.subtituloHeader}>
           Aprenda a controlar seu dinheiro e construir riqueza passo a passo.
         </Text>
+
+        <View style={styles.seletorMes}>
+          <TouchableOpacity onPress={irParaMesAnterior} style={styles.setaBtn}>
+            <MaterialCommunityIcons
+              name="chevron-left"
+              size={32}
+              color="#fff"
+            />
+          </TouchableOpacity>
+          <Text style={styles.nomeMes}>{nomeMesExibicao}</Text>
+          <TouchableOpacity onPress={irParaMesProximo} style={styles.setaBtn}>
+            <MaterialCommunityIcons
+              name="chevron-right"
+              size={32}
+              color="#fff"
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -203,7 +254,6 @@ const CarteiraScreen = ({ navigation }: any) => {
             />
           </View>
 
-          {/* RAIO X */}
           <View style={styles.raioXContainer}>
             <Text style={styles.tituloRaioX}>Raio-X de Cortes:</Text>
             <View style={styles.linhaRaioX}>
@@ -286,16 +336,11 @@ const CarteiraScreen = ({ navigation }: any) => {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* BARRA INFERIOR (BOTTOM MENU) */}
-      {/* BARRA INFERIOR (BOTTOM MENU) */}
-      {/* BARRA INFERIOR (BOTTOM MENU) */}
+      {/* BARRA INFERIOR (BOTTOM MENU - LIMPO E CORRIGIDO) */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.menuItem}
-          // Limpa a pilha inteira e volta direto para o Início
-          onPress={() =>
-            navigation.reset({ index: 0, routes: [{ name: "Dashboard" }] })
-          }
+          onPress={() => navigation.navigate("Dashboard")}
         >
           <MaterialCommunityIcons
             name="home-outline"
@@ -305,15 +350,28 @@ const CarteiraScreen = ({ navigation }: any) => {
           <Text style={styles.menuText}>Início</Text>
         </TouchableOpacity>
 
+        {/* BOTÃO CARTEIRA ATIVO */}
         <TouchableOpacity style={styles.menuItem}>
           <MaterialCommunityIcons name="wallet" size={28} color="#0056b3" />
           <Text style={styles.menuTextAtivo}>Carteira</Text>
         </TouchableOpacity>
 
+        {/* ATUALIZADO PARA A TELA DE HISTÓRICO */}
         <TouchableOpacity
           style={styles.menuItem}
-          // Substitui a Carteira pelo Perfil (não empilha)
-          onPress={() => navigation.replace("Perfil")}
+          onPress={() => navigation.navigate("HistoricoMensal")}
+        >
+          <MaterialCommunityIcons
+            name="calendar-month-outline"
+            size={28}
+            color="#9CA3AF"
+          />
+          <Text style={styles.menuText}>Histórico</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => navigation.navigate("Perfil")}
         >
           <MaterialCommunityIcons
             name="account-outline"
@@ -333,7 +391,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#0056b3",
     paddingHorizontal: 25,
     paddingTop: 50,
-    paddingBottom: 30,
+    paddingBottom: 20, // Diminuido um pouco para caber o seletor
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
     elevation: 5,
@@ -352,8 +410,17 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  content: { padding: 20 },
+  // ESTILOS NOVOS DO SELETOR DE MÊS
+  seletorMes: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 20,
+  },
+  setaBtn: { padding: 5 },
+  nomeMes: { fontSize: 18, fontWeight: "bold", color: "#fff" },
 
+  content: { padding: 20 },
   cardConselheiro: {
     backgroundColor: "#E0F2FE",
     borderRadius: 15,
@@ -369,7 +436,6 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontWeight: "500",
   },
-
   cardAnalise: {
     backgroundColor: "#fff",
     borderRadius: 15,
@@ -393,7 +459,6 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   descricaoCard: { fontSize: 13, color: "#6B7280", marginBottom: 15 },
-
   linhaValores: {
     flexDirection: "row",
     alignItems: "baseline",
@@ -401,7 +466,6 @@ const styles = StyleSheet.create({
   },
   valorGasto: { fontSize: 22, fontWeight: "bold", color: "#1F2937" },
   valorIdeal: { fontSize: 14, color: "#9CA3AF", marginLeft: 5 },
-
   barraFundo: {
     height: 10,
     backgroundColor: "#E5E7EB",
@@ -409,7 +473,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   barraProgresso: { height: "100%", borderRadius: 5 },
-
   raioXContainer: {
     marginTop: 15,
     backgroundColor: "#F9FAFB",
@@ -432,7 +495,6 @@ const styles = StyleSheet.create({
   },
   textoRaioX: { fontSize: 13, color: "#4B5563" },
   valorRaioX: { fontSize: 13, fontWeight: "bold", color: "#1F2937" },
-
   caixaMeta: {
     backgroundColor: "#D1FAE5",
     padding: 15,
